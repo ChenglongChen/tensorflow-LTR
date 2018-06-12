@@ -103,7 +103,8 @@ venv.bak/
 .mypy_cache/
 
 #
-,idea
+.idea
 src/.idea
 logs
 weights
+src/freeze_graph.py
