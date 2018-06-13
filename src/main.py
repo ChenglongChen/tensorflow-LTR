@@ -4,50 +4,34 @@ import numpy as np
 
 import utils
 from model import LogisticRegression, DNN, RankNet, LambdaRank
+from prepare_data import label_file_pat, group_file_pat, feature_file_pat
 
+def load_data(type):
 
-def get_train_valid_data(train_ratio=0.8):
-    qids = np.loadtxt("../data/qids.txt")
-    labels = np.loadtxt("../data/labels.txt")
-    features = np.loadtxt("../data/features.txt")
+    labels = np.load(label_file_pat%type)
+    qids = np.load(group_file_pat % type)
+    features = np.load(feature_file_pat%type)
 
-    # sample
-    qids_unique = np.unique(qids)
-    N = len(qids_unique)
-    idx = np.arange(N)
-    np.random.shuffle(idx)
-    train_num = int(N * train_ratio)
-    train_qids = qids_unique[idx[:train_num]]
-    valid_qids = qids_unique[idx[train_num:]]
-
-    train_ind = utils._get_intersect_index(qids, train_qids)
-    valid_ind = utils._get_intersect_index(qids, valid_qids)
-
-    X_train = {
-        "feature": features[train_ind],
-        "label": labels[train_ind],
-        "qid": qids[train_ind]
+    X = {
+        "feature": features,
+        "label": labels,
+        "qid": qids
     }
-
-    X_valid = {
-        "feature": features[valid_ind],
-        "label": labels[valid_ind],
-        "qid": qids[valid_ind]
-    }
-
-    return X_train, X_valid
-
+    return X
 
 
 utils._makedirs("../logs")
 logger = utils._get_logger("../logs", "tf-%s.log" % utils._timestamp())
 
 params_common = {
-    "batch_size": 32,
-    "epoch": 10,
-    "feature_dim": 2,
+    "batch_size": 256,
+    "epoch": 20,
+    "feature_dim": 46,
 
-    "optimizer_type": "nadam",
+    "batch_sampling_method": "sample",
+    "shuffle": True,
+
+    "optimizer_type": "adam",
     "init_lr": 0.001,
     "beta1": 0.975,
     "beta2": 0.999,
@@ -65,10 +49,10 @@ def train_lr():
     }
     params.update(params_common)
 
-    X_train, X_valid = get_train_valid_data(train_ratio=0.8)
+    X_train, X_valid = load_data("train"), load_data("vali")
 
     model = LogisticRegression("ranking", params, logger)
-    model.fit(X_train, validation_data=X_valid, shuffle=True)
+    model.fit(X_train, validation_data=X_valid)
     model.save_session()
 
 
@@ -83,10 +67,10 @@ def train_dnn():
     }
     params.update(params_common)
 
-    X_train, X_valid = get_train_valid_data(train_ratio=0.8)
+    X_train, X_valid = load_data("train"), load_data("vali")
 
     model = DNN("ranking", params, logger)
-    model.fit(X_train, validation_data=X_valid, shuffle=True)
+    model.fit(X_train, validation_data=X_valid)
     model.save_session()
 
 
@@ -105,10 +89,10 @@ def train_ranknet():
     }
     params.update(params_common)
 
-    X_train, X_valid = get_train_valid_data(train_ratio=0.8)
+    X_train, X_valid = load_data("train"), load_data("vali")
 
     model = RankNet("ranking", params, logger)
-    model.fit(X_train, validation_data=X_valid, shuffle=True)
+    model.fit(X_train, validation_data=X_valid)
     model.save_session()
 
 
@@ -126,10 +110,10 @@ def train_lambdarank():
     }
     params.update(params_common)
 
-    X_train, X_valid = get_train_valid_data(train_ratio=0.8)
+    X_train, X_valid = load_data("train"), load_data("vali")
 
     model = LambdaRank("ranking", params, logger)
-    model.fit(X_train, validation_data=X_valid, shuffle=True)
+    model.fit(X_train, validation_data=X_valid)
     model.save_session()
 
 

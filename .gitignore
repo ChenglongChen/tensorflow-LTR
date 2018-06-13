@@ -108,3 +108,5 @@ src/.idea
 logs
 weights
 src/freeze_graph.py
+data/Letor/*
+data/np*

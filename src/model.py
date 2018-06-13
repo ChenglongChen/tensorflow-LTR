@@ -86,7 +86,7 @@ class BaseRankModel(object):
         return jacobian.stack()
 
 
-    def _get_derivative(self, score, Wk, lambda_ij):
+    def _get_derivative(self, score, Wk, lambda_ij, x):
         """
         for ranknet and lambdarank
         :param score:
@@ -170,24 +170,44 @@ class BaseRankModel(object):
         return feed_dict
 
 
-    def fit(self, X, validation_data, shuffle=False):
-        qid_unique = np.unique(X["qid"])
-        num_qid_unique = len(qid_unique)
+    def fit(self, X, validation_data):
         start_time = time.time()
         l = X["feature"].shape[0]
         self.logger.info("fit on %d sample" % l)
-        train_idx_shuffle = np.arange(num_qid_unique)
+        qid_unique = np.unique(X["qid"])
+        num_qid_unique = len(qid_unique)
+        if self.params["batch_sampling_method"] == "group":
+            train_idx_shuffle = np.arange(num_qid_unique)
+        else:
+            train_idx_shuffle = np.arange(l)
         total_loss = 0.
         loss_decay = 0.9
         total_batch = 0
+        # evaluate before training
+        loss_mean_train, err_mean_train, ndcg_mean_train, ndcg_all_mean_train = self.evaluate(X)
+        if validation_data is not None:
+            loss_mean_valid, err_mean_valid, ndcg_mean_valid, ndcg_all_mean_valid = self.evaluate(validation_data)
+            self.logger.info(
+                "[epoch-{}, batch-{}] -- Train Loss: {:5f} NDCG: {:5f} ({:5f}) ERR: {:5f}  -- Valid Loss: {:5f} NDCG: {:5f} ({:5f}) ERR: {:5f} -- {:5f} s".format(
+                    0, 0, loss_mean_train, ndcg_mean_train, ndcg_all_mean_train, err_mean_train,
+                    loss_mean_valid, ndcg_mean_valid, ndcg_all_mean_valid, err_mean_valid,
+                    time.time() - start_time))
+        else:
+            self.logger.info(
+                "[epoch-{}, batch-{}] -- Train Loss: {:5f} NDCG: {:5f} ({:5f}) ERR: {:5f} -- {:5f} s".format(
+                    0, 0, loss_mean_train, ndcg_mean_train, ndcg_all_mean_train, err_mean_train,
+                    time.time() - start_time))
         for epoch in range(self.params["epoch"]):
             self.logger.info("epoch: %d" % (epoch + 1))
             np.random.seed(epoch)
-            if shuffle:
+            if self.params["shuffle"]:
                 np.random.shuffle(train_idx_shuffle)
             batches = self._get_batch_index(train_idx_shuffle, self.params["batch_size"])
             for i, idx in enumerate(batches):
-                ind = utils._get_intersect_index(X["qid"], qid_unique[idx])
+                if self.params["batch_sampling_method"] == "group":
+                    ind = utils._get_intersect_index(X["qid"], qid_unique[idx])
+                else:
+                    ind = idx
                 feed_dict = self._get_feed_dict(X, ind, training=True)
                 loss, lr, opt = self.sess.run((self.loss, self.learning_rate, self.train_op), feed_dict=feed_dict)
                 total_loss = loss_decay * total_loss + (1. - loss_decay) * loss
@@ -233,7 +253,7 @@ class BaseRankModel(object):
             feed_dict = self._get_feed_dict(X, ind, training=False)
             loss, score = self.sess.run((self.loss, self.score), feed_dict=feed_dict)
             df = pd.DataFrame({"label": X["label"][ind].flatten(), "score": score.flatten()})
-            df.sort_values("score", ascending=False)
+            df.sort_values("score", ascending=False, inplace=True)
 
             losses[e] = loss
             ndcgs[e] = ndcg(df["label"])
@@ -308,7 +328,7 @@ class RankNet(BaseRankModel):
         mask = mask1 * mask2
         num_pairs = tf.reduce_sum(mask)
 
-        loss = tf.reduce_sum(logloss * mask) / num_pairs
+        loss = tf.cond(tf.equal(num_pairs, 0), lambda: 0., lambda: tf.reduce_sum(logloss * mask) / num_pairs)
 
         return loss, num_pairs, score, self._get_train_op(loss)
 
@@ -336,12 +356,12 @@ class RankNet(BaseRankModel):
         mask = mask1 * mask2
         num_pairs = tf.reduce_sum(mask)
 
-        loss = tf.reduce_sum(logloss * mask) / num_pairs
+        loss = tf.cond(tf.equal(num_pairs, 0), lambda: 0., lambda: tf.reduce_sum(logloss * mask) / num_pairs)
 
         lambda_ij = lambda_ij * mask
 
         vars = tf.trainable_variables()
-        grads = [self._get_derivative(score, Wk, lambda_ij) for Wk in vars]
+        grads = [self._get_derivative(score, Wk, lambda_ij, self.feature) for Wk in vars]
 
         with tf.name_scope("optimization"):
             if self.params["optimizer_type"] == "nadam":
@@ -388,7 +408,7 @@ class LambdaRank(BaseRankModel):
         mask = mask1 * mask2
         num_pairs = tf.reduce_sum(mask)
 
-        loss = tf.reduce_sum(logloss * mask) / num_pairs
+        loss = tf.cond(tf.equal(num_pairs, 0), lambda: 0., lambda: tf.reduce_sum(logloss * mask) / num_pairs)
 
         lambda_ij = lambda_ij * mask
 
@@ -414,7 +434,7 @@ class LambdaRank(BaseRankModel):
         lambda_ij = lambda_ij * ndcg_delta
 
         vars = tf.trainable_variables()
-        grads = [self._get_derivative(score, Wk, lambda_ij) for Wk in vars]
+        grads = [self._get_derivative(score, Wk, lambda_ij, self.feature) for Wk in vars]
 
         with tf.name_scope("optimization"):
             if self.params["optimizer_type"] == "nadam":
