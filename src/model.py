@@ -95,6 +95,7 @@ class BaseRankModel(object):
         :return:
         """
         # dsi_dWk = tf.map_fn(lambda s: tf.gradients(s, [Wk])[0], score) # do not work
+        # dsi_dWk = tf.stack([tf.gradients(si, x)[0] for si in tf.unstack(score, axis=1)], axis=2) # do not work
         dsi_dWk = self._jacobian(score, Wk)
         dsi_dWk_minus_dsj_dWk = tf.expand_dims(dsi_dWk, 1) - tf.expand_dims(dsi_dWk, 0)
         shape = tf.concat(
@@ -396,6 +397,7 @@ class LambdaRank(BaseRankModel):
         s_i_minus_s_j = logits = score - tf.transpose(score)
         sigma = self.params["sigma"]
         lambda_ij = sigma * ((1 / 2) * (1 - S_ij) - tf.nn.sigmoid(-sigma*s_i_minus_s_j))
+        # lambda_ij = -sigma * tf.nn.sigmoid(-sigma*s_i_minus_s_j)
 
         logloss = tf.nn.sigmoid_cross_entropy_with_logits(logits=s_i_minus_s_j, labels=P_ij)
 
